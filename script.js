@@ -7,6 +7,7 @@ const unitMap = new Map(units.map((unit) => [unit.id, unit]));
 const unitButtons = new Map();
 let currentMode = "add";
 const selectedCostFilters = new Set(["1", "2"]);
+const excludedTraits = new Set();
 
 const unitGroupsEl = document.getElementById("unitGroups");
 const activeSynergiesEl = document.getElementById("activeSynergies");
@@ -15,7 +16,19 @@ const tabAddEl = document.getElementById("tabAdd");
 const tabSwapEl = document.getElementById("tabSwap");
 const tabAddSwapEl = document.getElementById("tabAddSwap");
 const costFiltersEl = document.getElementById("costFilters");
+const traitExcludesEl = document.getElementById("traitExcludes");
 const traitTooltipEl = document.getElementById("traitTooltip");
+
+function syncExcludedTraitsFromInputs() {
+  excludedTraits.clear();
+  if (!traitExcludesEl) return;
+  traitExcludesEl.querySelectorAll("input[data-exclude-trait]").forEach((input) => {
+    const traitName = input.dataset.excludeTrait;
+    if (!traitName) return;
+    // OFF: 計算対象外 / ON: 計算対象
+    if (!input.checked) excludedTraits.add(traitName);
+  });
+}
 
 function makeIcon(src, alt) {
   const img = document.createElement("img");
@@ -183,6 +196,7 @@ function getTraitCounts(unitIds) {
     const unit = unitMap.get(id);
     if (!unit) return;
     unit.traits.forEach((traitName) => {
+      if (excludedTraits.has(traitName)) return;
       counts[traitName] = (counts[traitName] || 0) + 1;
     });
   });
@@ -651,6 +665,7 @@ function applySimulationAction(cardEl) {
 function init() {
   buildUnitGroups();
   updateUnitSelectionStyles();
+  syncExcludedTraitsFromInputs();
   renderRightPane();
   setupTooltipHandlers();
 
@@ -679,6 +694,15 @@ function init() {
       if (!cost) return;
       if (selectedCostFilters.has(cost)) selectedCostFilters.delete(cost);
       else selectedCostFilters.add(cost);
+      renderRightPane();
+    });
+  }
+
+  if (traitExcludesEl) {
+    traitExcludesEl.addEventListener("change", (event) => {
+      const input = event.target.closest("input[data-exclude-trait]");
+      if (!input) return;
+      syncExcludedTraitsFromInputs();
       renderRightPane();
     });
   }

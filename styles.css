@@ -249,6 +249,35 @@ body {
   flex-wrap: wrap;
 }
 
+.sim-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trait-excludes {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.exclude-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.exclude-item input[type="checkbox"] {
+  width: 12px;
+  height: 12px;
+  accent-color: rgba(114, 187, 246, 0.95);
+  cursor: pointer;
+}
+
 .tab,
 .filter-btn {
   border: 1px solid rgba(188, 212, 239, 0.86);
