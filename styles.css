@@ -273,7 +273,7 @@ body {
   display: grid;
   gap: 3px;
   align-content: start;
-  grid-auto-rows: 34px;
+  grid-auto-rows: minmax(34px, auto);
   padding-right: 2px;
 }
 
@@ -285,7 +285,7 @@ body {
   display: flex;
   align-items: center;
   gap: 5px;
-  height: 34px;
+  min-height: 34px;
   cursor: pointer;
   transition: background 0.12s ease, box-shadow 0.12s ease;
 }
@@ -337,9 +337,10 @@ body {
   min-width: 0;
   flex: 1 1 auto;
   font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.25;
 }
 
 .delta-trait {

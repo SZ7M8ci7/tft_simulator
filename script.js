@@ -13,6 +13,7 @@ const activeSynergiesEl = document.getElementById("activeSynergies");
 const simResultsEl = document.getElementById("simResults");
 const tabAddEl = document.getElementById("tabAdd");
 const tabSwapEl = document.getElementById("tabSwap");
+const tabAddSwapEl = document.getElementById("tabAddSwap");
 const costFiltersEl = document.getElementById("costFilters");
 const traitTooltipEl = document.getElementById("traitTooltip");
 
@@ -243,6 +244,29 @@ function buildChangedTraits(baseCounts, nextCounts, changedTraits) {
   return rows.sort((a, b) => b.to - a.to || a.traitName.localeCompare(b.traitName));
 }
 
+function evaluateCandidateDelta(baseCounts, baseActive, nextUnitIds) {
+  const nextCounts = getTraitCounts(nextUnitIds);
+  const nextActive = getActiveLevels(nextCounts);
+  const delta = scoreDelta(baseActive, nextActive);
+  const hasNegative = delta.deactivated.length > 0 || delta.downgraded.length > 0;
+  const hasPositive = delta.newly.length > 0 || delta.upgraded.length > 0;
+  const showZeroTradeoff = delta.score === 0 && hasNegative && hasPositive;
+  return {
+    score: delta.score,
+    include: delta.score > 0 || showZeroTradeoff,
+    changes: buildChangedTraits(baseCounts, nextCounts, [
+      ...delta.newly,
+      ...delta.upgraded,
+      ...delta.downgraded,
+    ]),
+    deactivatedChanges: delta.deactivated.map((traitName) => ({
+      traitName,
+      from: baseCounts[traitName] || 0,
+      to: nextCounts[traitName] || 0,
+    })),
+  };
+}
+
 function buildUnitGroups() {
   const costs = [...new Set(units.map((unit) => unit.cost))].sort((a, b) => a - b);
   unitGroupsEl.innerHTML = "";
@@ -338,13 +362,14 @@ function computeAddCandidates() {
     .filter((unit) => !selected.has(unit.id))
     .map((candidate) => {
       const next = new Set([...selected, candidate.id]);
-      const nextCounts = getTraitCounts(next);
-      const nextActive = getActiveLevels(nextCounts);
-      const delta = scoreDelta(baseActive, nextActive);
+      const evalDelta = evaluateCandidateDelta(baseCounts, baseActive, next);
       return {
         candidate,
-        score: delta.score,
-        changes: buildChangedTraits(baseCounts, nextCounts, [...delta.newly, ...delta.upgraded]),
+        score: evalDelta.score,
+        changes: evalDelta.changes,
+        deactivatedChanges: evalDelta.deactivatedChanges,
+        filterCosts: [candidate.cost],
+        primaryCost: candidate.cost,
       };
     })
     .filter((row) => row.score > 0)
@@ -370,39 +395,67 @@ function computeSwapCandidates() {
       .forEach((addUnit) => {
         const next = new Set(selectedIds.filter((id) => id !== removeId));
         next.add(addUnit.id);
-
-        const nextCounts = getTraitCounts(next);
-        const nextActive = getActiveLevels(nextCounts);
-        const delta = scoreDelta(baseActive, nextActive);
-        const adjustedScore = delta.score;
-        const hasNegative = delta.deactivated.length > 0 || delta.downgraded.length > 0;
-        const hasPositive = delta.newly.length > 0 || delta.upgraded.length > 0;
-        const showZeroTradeoff =
-          adjustedScore === 0 && hasNegative && hasPositive;
-        if (adjustedScore < 0 || (adjustedScore === 0 && !showZeroTradeoff)) return;
-        const deactivatedChanges = delta.deactivated.map((traitName) => ({
-          traitName,
-          from: baseCounts[traitName] || 0,
-          to: nextCounts[traitName] || 0,
-        }));
+        const evalDelta = evaluateCandidateDelta(baseCounts, baseActive, next);
+        if (!evalDelta.include) return;
 
         rows.push({
           remove: unitMap.get(removeId),
           add: addUnit,
-          score: adjustedScore,
-          changes: buildChangedTraits(baseCounts, nextCounts, [
-            ...delta.newly,
-            ...delta.upgraded,
-            ...delta.downgraded,
-          ]),
-          deactivated: delta.deactivated,
-          deactivatedChanges,
+          score: evalDelta.score,
+          changes: evalDelta.changes,
+          deactivatedChanges: evalDelta.deactivatedChanges,
+          filterCosts: [addUnit.cost],
+          primaryCost: addUnit.cost,
         });
       });
   });
 
   return rows.sort(
     (a, b) => b.score - a.score || b.add.cost - a.add.cost || a.add.name.localeCompare(b.add.name)
+  );
+}
+
+function computeAddSwapCandidates() {
+  if (!selected.size) return [];
+
+  const selectedIds = [...selected];
+  const baseCounts = getTraitCounts(selected);
+  const baseActive = getActiveLevels(baseCounts);
+  const available = units.filter((unit) => !selected.has(unit.id));
+  const rows = [];
+
+  selectedIds.forEach((removeId) => {
+    for (let i = 0; i < available.length; i += 1) {
+      for (let j = i + 1; j < available.length; j += 1) {
+        const addA = available[i];
+        const addB = available[j];
+        const next = new Set(selectedIds.filter((id) => id !== removeId));
+        next.add(addA.id);
+        next.add(addB.id);
+        const evalDelta = evaluateCandidateDelta(baseCounts, baseActive, next);
+        if (!evalDelta.include) continue;
+        rows.push({
+          remove: unitMap.get(removeId),
+          addA,
+          addB,
+          score: evalDelta.score,
+          changes: evalDelta.changes,
+          deactivatedChanges: evalDelta.deactivatedChanges,
+          filterCosts: [addA.cost, addB.cost],
+          primaryCost: Math.max(addA.cost, addB.cost),
+          totalCost: addA.cost + addB.cost,
+        });
+      }
+    }
+  });
+
+  return rows.sort(
+    (a, b) =>
+      b.score - a.score ||
+      b.totalCost - a.totalCost ||
+      b.primaryCost - a.primaryCost ||
+      a.addA.name.localeCompare(b.addA.name) ||
+      a.addB.name.localeCompare(b.addB.name)
   );
 }
 
@@ -435,11 +488,12 @@ function buildResultUnitIcon(unit) {
 
 function buildAddCard(row) {
   const addId = escapeHtmlAttr(row.candidate.id);
-  return `<article class="result-card" data-cost="${row.candidate.cost}" data-action="add" data-add-id="${addId}">
+  const allChanges = [...(row.changes || []), ...(row.deactivatedChanges || [])];
+  return `<article class="result-card" data-cost="${row.primaryCost}" data-action="add" data-add-id="${addId}">
     <div class="result-top" title="${row.candidate.name}">
       ${buildResultUnitIcon(row.candidate)}
     </div>
-    <div class="delta">${formatChangedHtml(row.changes)}</div>
+    <div class="delta">${formatChangedHtml(allChanges)}</div>
   </article>`;
 }
 
@@ -447,7 +501,7 @@ function buildSwapCard(row) {
   const addId = escapeHtmlAttr(row.add.id);
   const removeId = escapeHtmlAttr(row.remove.id);
   const allChanges = [...(row.changes || []), ...(row.deactivatedChanges || [])];
-  return `<article class="result-card" data-cost="${row.add.cost}" data-action="swap" data-add-id="${addId}" data-remove-id="${removeId}">
+  return `<article class="result-card" data-cost="${row.primaryCost}" data-action="swap" data-add-id="${addId}" data-remove-id="${removeId}">
     <div class="result-top" title="${row.remove.name} -> ${row.add.name}">
       ${buildResultUnitIcon(row.remove)}
       <span class="arrow">-></span>
@@ -457,12 +511,28 @@ function buildSwapCard(row) {
   </article>`;
 }
 
+function buildAddSwapCard(row) {
+  const addId = escapeHtmlAttr(row.addA.id);
+  const addId2 = escapeHtmlAttr(row.addB.id);
+  const removeId = escapeHtmlAttr(row.remove.id);
+  const allChanges = [...(row.changes || []), ...(row.deactivatedChanges || [])];
+  return `<article class="result-card" data-cost="${row.primaryCost}" data-action="addswap" data-add-id="${addId}" data-add-id2="${addId2}" data-remove-id="${removeId}">
+    <div class="result-top" title="${row.remove.name} -> ${row.addA.name} + ${row.addB.name}">
+      ${buildResultUnitIcon(row.remove)}
+      <span class="arrow">-></span>
+      ${buildResultUnitIcon(row.addA)}
+      <span class="arrow">+</span>
+      ${buildResultUnitIcon(row.addB)}
+    </div>
+    <div class="delta">${formatChangedHtml(allChanges)}</div>
+  </article>`;
+}
+
 function applyCostFilter(rows) {
   if (!selectedCostFilters.size) return [];
-  if (currentMode === "add") {
-    return rows.filter((row) => selectedCostFilters.has(String(row.candidate.cost)));
-  }
-  return rows.filter((row) => selectedCostFilters.has(String(row.add.cost)));
+  return rows.filter((row) =>
+    (row.filterCosts || []).every((cost) => selectedCostFilters.has(String(cost)))
+  );
 }
 
 function renderSimulation() {
@@ -476,17 +546,28 @@ function renderSimulation() {
     return;
   }
 
-  const rows = applyCostFilter(computeSwapCandidates());
+  if (currentMode === "swap") {
+    const rows = applyCostFilter(computeSwapCandidates());
+    if (!rows.length) {
+      simResultsEl.innerHTML = '<div class="empty">該当候補なし</div>';
+      return;
+    }
+    simResultsEl.innerHTML = rows.map((row) => buildSwapCard(row)).join("");
+    return;
+  }
+
+  const rows = applyCostFilter(computeAddSwapCandidates());
   if (!rows.length) {
     simResultsEl.innerHTML = '<div class="empty">該当候補なし</div>';
     return;
   }
-  simResultsEl.innerHTML = rows.map((row) => buildSwapCard(row)).join("");
+  simResultsEl.innerHTML = rows.map((row) => buildAddSwapCard(row)).join("");
 }
 
 function renderTabs() {
   tabAddEl.classList.toggle("active", currentMode === "add");
   tabSwapEl.classList.toggle("active", currentMode === "swap");
+  if (tabAddSwapEl) tabAddSwapEl.classList.toggle("active", currentMode === "addswap");
 }
 
 function renderCostFilters() {
@@ -544,6 +625,7 @@ function renderRightPane() {
 function applySimulationAction(cardEl) {
   const action = cardEl.dataset.action;
   const addId = cardEl.dataset.addId;
+  const addId2 = cardEl.dataset.addId2;
   const removeId = cardEl.dataset.removeId;
   if (!action || !addId || !unitMap.has(addId)) return;
 
@@ -553,6 +635,11 @@ function applySimulationAction(cardEl) {
     if (!removeId || !selected.has(removeId)) return;
     selected.delete(removeId);
     selected.add(addId);
+  } else if (action === "addswap") {
+    if (!removeId || !selected.has(removeId) || !addId2 || !unitMap.has(addId2)) return;
+    selected.delete(removeId);
+    selected.add(addId);
+    selected.add(addId2);
   } else {
     return;
   }
@@ -576,6 +663,13 @@ function init() {
     currentMode = "swap";
     renderRightPane();
   });
+
+  if (tabAddSwapEl) {
+    tabAddSwapEl.addEventListener("click", () => {
+      currentMode = "addswap";
+      renderRightPane();
+    });
+  }
 
   if (costFiltersEl) {
     costFiltersEl.addEventListener("click", (event) => {
