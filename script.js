@@ -199,27 +199,45 @@ function getActiveLevels(traitCounts) {
 }
 
 function scoreDelta(baseActive, nextActive) {
-  const baseTraits = new Set(Object.keys(baseActive));
-  const nextTraits = new Set(Object.keys(nextActive));
+  const traitNames = new Set([...Object.keys(baseActive), ...Object.keys(nextActive)]);
+  const newly = [];
+  const upgraded = [];
+  const downgraded = [];
+  const deactivated = [];
 
-  const newly = [...nextTraits].filter((traitName) => !baseTraits.has(traitName));
-  const upgraded = [...nextTraits].filter(
-    (traitName) => baseTraits.has(traitName) && nextActive[traitName] > baseActive[traitName]
-  );
+  traitNames.forEach((traitName) => {
+    const baseLevel = baseActive[traitName] || 0;
+    const nextLevel = nextActive[traitName] || 0;
+
+    if (baseLevel === 0 && nextLevel > 0) {
+      newly.push(traitName);
+      return;
+    }
+    if (baseLevel > 0 && nextLevel === 0) {
+      deactivated.push(traitName);
+      return;
+    }
+    if (nextLevel > baseLevel) {
+      upgraded.push(traitName);
+      return;
+    }
+    if (nextLevel < baseLevel) {
+      downgraded.push(traitName);
+    }
+  });
 
   return {
-    score: newly.length + upgraded.length,
+    score: newly.length + upgraded.length - downgraded.length - deactivated.length,
     newly,
     upgraded,
+    downgraded,
+    deactivated,
   };
 }
 
-function buildChangedTraits(baseCounts, nextCounts, newly, upgraded) {
+function buildChangedTraits(baseCounts, nextCounts, changedTraits) {
   const rows = [];
-  newly.forEach((traitName) => {
-    rows.push({ traitName, from: baseCounts[traitName] || 0, to: nextCounts[traitName] || 0 });
-  });
-  upgraded.forEach((traitName) => {
+  (changedTraits || []).forEach((traitName) => {
     rows.push({ traitName, from: baseCounts[traitName] || 0, to: nextCounts[traitName] || 0 });
   });
   return rows.sort((a, b) => b.to - a.to || a.traitName.localeCompare(b.traitName));
@@ -326,7 +344,7 @@ function computeAddCandidates() {
       return {
         candidate,
         score: delta.score,
-        changes: buildChangedTraits(baseCounts, nextCounts, delta.newly, delta.upgraded),
+        changes: buildChangedTraits(baseCounts, nextCounts, [...delta.newly, ...delta.upgraded]),
       };
     })
     .filter((row) => row.score > 0)
@@ -356,14 +374,13 @@ function computeSwapCandidates() {
         const nextCounts = getTraitCounts(next);
         const nextActive = getActiveLevels(nextCounts);
         const delta = scoreDelta(baseActive, nextActive);
-        const deactivated = Object.keys(baseActive)
-          .filter((traitName) => !nextActive[traitName])
-          .sort((a, b) => a.localeCompare(b));
-        const adjustedScore = delta.score - deactivated.length;
+        const adjustedScore = delta.score;
+        const hasNegative = delta.deactivated.length > 0 || delta.downgraded.length > 0;
+        const hasPositive = delta.newly.length > 0 || delta.upgraded.length > 0;
         const showZeroTradeoff =
-          adjustedScore === 0 && deactivated.length > 0 && delta.newly.length > 0;
+          adjustedScore === 0 && hasNegative && hasPositive;
         if (adjustedScore < 0 || (adjustedScore === 0 && !showZeroTradeoff)) return;
-        const deactivatedChanges = deactivated.map((traitName) => ({
+        const deactivatedChanges = delta.deactivated.map((traitName) => ({
           traitName,
           from: baseCounts[traitName] || 0,
           to: nextCounts[traitName] || 0,
@@ -373,8 +390,12 @@ function computeSwapCandidates() {
           remove: unitMap.get(removeId),
           add: addUnit,
           score: adjustedScore,
-          changes: buildChangedTraits(baseCounts, nextCounts, delta.newly, delta.upgraded),
-          deactivated,
+          changes: buildChangedTraits(baseCounts, nextCounts, [
+            ...delta.newly,
+            ...delta.upgraded,
+            ...delta.downgraded,
+          ]),
+          deactivated: delta.deactivated,
           deactivatedChanges,
         });
       });
@@ -394,7 +415,15 @@ function formatTraitChangeHtml(change) {
 }
 
 function formatChangedHtml(changes) {
-  return changes.map((change) => formatTraitChangeHtml(change)).join(" / ");
+  const ups = [];
+  const downs = [];
+  const neutrals = [];
+  (changes || []).forEach((change) => {
+    if (change.to > change.from) ups.push(change);
+    else if (change.to < change.from) downs.push(change);
+    else neutrals.push(change);
+  });
+  return [...ups, ...neutrals, ...downs].map((change) => formatTraitChangeHtml(change)).join(" / ");
 }
 
 function buildResultUnitIcon(unit) {
@@ -417,16 +446,14 @@ function buildAddCard(row) {
 function buildSwapCard(row) {
   const addId = escapeHtmlAttr(row.add.id);
   const removeId = escapeHtmlAttr(row.remove.id);
-  const deactivatedText = row.deactivatedChanges?.length
-    ? ` / ${row.deactivatedChanges.map((change) => formatTraitChangeHtml(change)).join(" / ")}`
-    : "";
+  const allChanges = [...(row.changes || []), ...(row.deactivatedChanges || [])];
   return `<article class="result-card" data-cost="${row.add.cost}" data-action="swap" data-add-id="${addId}" data-remove-id="${removeId}">
     <div class="result-top" title="${row.remove.name} -> ${row.add.name}">
       ${buildResultUnitIcon(row.remove)}
       <span class="arrow">-></span>
       ${buildResultUnitIcon(row.add)}
     </div>
-    <div class="delta">${formatChangedHtml(row.changes)}${deactivatedText}</div>
+    <div class="delta">${formatChangedHtml(allChanges)}</div>
   </article>`;
 }
 
