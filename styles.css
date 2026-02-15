@@ -146,6 +146,14 @@ body {
   filter: saturate(1) brightness(1.03);
 }
 
+.unit-btn.excluded {
+  opacity: 0.46;
+}
+
+.unit-btn.excluded .icon {
+  filter: grayscale(1) saturate(0) brightness(0.74);
+}
+
 .select-mark {
   position: absolute;
   right: 1px;
@@ -164,6 +172,29 @@ body {
 
 .unit-btn.selected .select-mark {
   display: block;
+}
+
+.exclude-toggle {
+  position: absolute;
+  left: 1px;
+  bottom: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #7f8da0;
+  border: 1px solid rgba(168, 194, 224, 0.95);
+  font-size: 10px;
+  line-height: 10px;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.unit-btn.excluded .exclude-toggle {
+  background: rgba(210, 73, 73, 0.92);
+  border-color: rgba(205, 65, 65, 0.96);
+  color: #fff;
 }
 
 .right {
@@ -249,35 +280,6 @@ body {
   flex-wrap: wrap;
 }
 
-.sim-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.trait-excludes {
-  display: inline-flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.exclude-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  color: var(--text);
-  white-space: nowrap;
-}
-
-.exclude-item input[type="checkbox"] {
-  width: 12px;
-  height: 12px;
-  accent-color: rgba(114, 187, 246, 0.95);
-  cursor: pointer;
-}
-
 .tab,
 .filter-btn {
   border: 1px solid rgba(188, 212, 239, 0.86);
@@ -355,6 +357,37 @@ body {
   width: 30px;
   padding: 1px;
   cursor: default;
+}
+
+.result-icon {
+  position: relative;
+}
+
+.result-icon.excluded .icon {
+  filter: grayscale(1) saturate(0) brightness(0.74);
+}
+
+.result-exclude-toggle {
+  position: absolute;
+  left: 1px;
+  bottom: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #7f8da0;
+  border: 1px solid rgba(168, 194, 224, 0.95);
+  font-size: 9px;
+  line-height: 8px;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.result-icon.excluded .result-exclude-toggle {
+  background: rgba(210, 73, 73, 0.92);
+  border-color: rgba(205, 65, 65, 0.96);
+  color: #fff;
 }
 
 .arrow {

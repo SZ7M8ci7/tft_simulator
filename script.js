@@ -7,7 +7,12 @@ const unitMap = new Map(units.map((unit) => [unit.id, unit]));
 const unitButtons = new Map();
 let currentMode = "add";
 const selectedCostFilters = new Set(["1", "2"]);
-const excludedTraits = new Set();
+const defaultExcludedTraitNames = new Set(["ターゴン", "ケアテイカー"]);
+const excludedUnitIds = new Set(
+  units
+    .filter((unit) => unit.traits.some((traitName) => defaultExcludedTraitNames.has(traitName)))
+    .map((unit) => unit.id)
+);
 
 const unitGroupsEl = document.getElementById("unitGroups");
 const activeSynergiesEl = document.getElementById("activeSynergies");
@@ -16,19 +21,7 @@ const tabAddEl = document.getElementById("tabAdd");
 const tabSwapEl = document.getElementById("tabSwap");
 const tabAddSwapEl = document.getElementById("tabAddSwap");
 const costFiltersEl = document.getElementById("costFilters");
-const traitExcludesEl = document.getElementById("traitExcludes");
 const traitTooltipEl = document.getElementById("traitTooltip");
-
-function syncExcludedTraitsFromInputs() {
-  excludedTraits.clear();
-  if (!traitExcludesEl) return;
-  traitExcludesEl.querySelectorAll("input[data-exclude-trait]").forEach((input) => {
-    const traitName = input.dataset.excludeTrait;
-    if (!traitName) return;
-    // OFF: 計算対象外 / ON: 計算対象
-    if (!input.checked) excludedTraits.add(traitName);
-  });
-}
 
 function makeIcon(src, alt) {
   const img = document.createElement("img");
@@ -196,7 +189,6 @@ function getTraitCounts(unitIds) {
     const unit = unitMap.get(id);
     if (!unit) return;
     unit.traits.forEach((traitName) => {
-      if (excludedTraits.has(traitName)) return;
       counts[traitName] = (counts[traitName] || 0) + 1;
     });
   });
@@ -308,6 +300,15 @@ function buildUnitGroups() {
         selectMark.className = "select-mark";
         selectMark.textContent = "✓";
         button.appendChild(selectMark);
+        const excludeToggle = document.createElement("span");
+        excludeToggle.className = "exclude-toggle";
+        excludeToggle.textContent = "×";
+        excludeToggle.title = "候補から除外";
+        excludeToggle.addEventListener("click", (event) => {
+          event.stopPropagation();
+          toggleUnitCandidateExclusion(unit.id);
+        });
+        button.appendChild(excludeToggle);
 
         button.addEventListener("click", () => {
           if (selected.has(unit.id)) {
@@ -331,7 +332,20 @@ function buildUnitGroups() {
 function updateUnitSelectionStyles() {
   unitButtons.forEach((button, unitId) => {
     button.classList.toggle("selected", selected.has(unitId));
+    button.classList.toggle("excluded", excludedUnitIds.has(unitId));
   });
+}
+
+function toggleUnitCandidateExclusion(unitId) {
+  if (!unitMap.has(unitId)) return;
+  if (excludedUnitIds.has(unitId)) excludedUnitIds.delete(unitId);
+  else excludedUnitIds.add(unitId);
+  updateUnitSelectionStyles();
+  renderRightPane();
+}
+
+function getAvailableCandidateUnits() {
+  return units.filter((unit) => !selected.has(unit.id) && !excludedUnitIds.has(unit.id));
 }
 
 function renderActiveSynergies() {
@@ -372,8 +386,7 @@ function computeAddCandidates() {
   const baseCounts = getTraitCounts(selected);
   const baseActive = getActiveLevels(baseCounts);
 
-  return units
-    .filter((unit) => !selected.has(unit.id))
+  return getAvailableCandidateUnits()
     .map((candidate) => {
       const next = new Set([...selected, candidate.id]);
       const evalDelta = evaluateCandidateDelta(baseCounts, baseActive, next);
@@ -404,8 +417,7 @@ function computeSwapCandidates() {
   const rows = [];
 
   selectedIds.forEach((removeId) => {
-    units
-      .filter((unit) => !selected.has(unit.id))
+    getAvailableCandidateUnits()
       .forEach((addUnit) => {
         const next = new Set(selectedIds.filter((id) => id !== removeId));
         next.add(addUnit.id);
@@ -435,7 +447,7 @@ function computeAddSwapCandidates() {
   const selectedIds = [...selected];
   const baseCounts = getTraitCounts(selected);
   const baseActive = getActiveLevels(baseCounts);
-  const available = units.filter((unit) => !selected.has(unit.id));
+  const available = getAvailableCandidateUnits();
   const rows = [];
 
   selectedIds.forEach((removeId) => {
@@ -497,7 +509,9 @@ function buildResultUnitIcon(unit) {
   const tooltip = escapeHtmlAttr(`${unit.name} | ${unit.traits.join(" / ")}`);
   const name = escapeHtmlAttr(unit.name);
   const icon = escapeHtmlAttr(unit.icon);
-  return `<div class="icon-btn result-icon" data-tooltip="${tooltip}"><img class="icon" src="${icon}" alt="${name}" loading="lazy" /></div>`;
+  const unitId = escapeHtmlAttr(unit.id);
+  const excludedClass = excludedUnitIds.has(unit.id) ? " excluded" : "";
+  return `<div class="icon-btn result-icon${excludedClass}" data-tooltip="${tooltip}"><img class="icon" src="${icon}" alt="${name}" loading="lazy" /><span class="result-exclude-toggle" data-result-exclude-id="${unitId}" title="候補から除外">×</span></div>`;
 }
 
 function buildAddCard(row) {
@@ -665,7 +679,6 @@ function applySimulationAction(cardEl) {
 function init() {
   buildUnitGroups();
   updateUnitSelectionStyles();
-  syncExcludedTraitsFromInputs();
   renderRightPane();
   setupTooltipHandlers();
 
@@ -698,16 +711,13 @@ function init() {
     });
   }
 
-  if (traitExcludesEl) {
-    traitExcludesEl.addEventListener("change", (event) => {
-      const input = event.target.closest("input[data-exclude-trait]");
-      if (!input) return;
-      syncExcludedTraitsFromInputs();
-      renderRightPane();
-    });
-  }
-
   simResultsEl.addEventListener("click", (event) => {
+    const excludeToggle = event.target.closest("[data-result-exclude-id]");
+    if (excludeToggle && simResultsEl.contains(excludeToggle)) {
+      const unitId = excludeToggle.dataset.resultExcludeId;
+      if (unitId) toggleUnitCandidateExclusion(unitId);
+      return;
+    }
     const card = event.target.closest(".result-card");
     if (!card || !simResultsEl.contains(card)) return;
     applySimulationAction(card);
